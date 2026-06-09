@@ -10,3 +10,4 @@ class DocumentAgentDeps:
     user_id: str
     thread_id: str
     retriever: DocumentRetriever
+    message_history: str = ""

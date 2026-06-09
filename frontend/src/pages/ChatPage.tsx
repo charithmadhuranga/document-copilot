@@ -1,10 +1,37 @@
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, UIMessage } from "ai";
 import { useChat } from "@ai-sdk/react";
 import { useAuth } from "@/hooks/useAuth";
 import { env } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
-import { FormEvent, useEffect, useRef } from "react";
+import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "@/components/Markdown";
+import Chart from "@/components/Chart";
+
+const THREAD_KEY = "doc-copilot-thread";
+
+function getStoredThreadId(): string | null {
+  return localStorage.getItem(THREAD_KEY);
+}
+
+function storeThreadId(id: string) {
+  localStorage.setItem(THREAD_KEY, id);
+}
+
+async function loadMessages(threadId: string): Promise<UIMessage[]> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (!token) return [];
+  const res = await fetch(`${env.apiBaseUrl}/api/threads/${threadId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const msgs = await res.json();
+  return msgs.map((m: { id: string; role: string; content: string }) => ({
+    id: m.id,
+    role: m.role,
+    parts: [{ type: "text" as const, text: m.content }],
+  }));
+}
 
 function ThinkingDots() {
   return (
@@ -20,12 +47,76 @@ function Cursor() {
   return <span className="inline-block w-[2px] h-[1em] bg-gray-600 align-middle ml-0.5 animate-blink" />;
 }
 
+interface MessageItemProps {
+  msg: { id: string; role: string; parts: Array<{ type: string; [key: string]: unknown }> };
+  isUser: boolean;
+  isCurrentAssistant: boolean;
+  assistantStreaming: boolean;
+}
+
+const MessageItem = memo(function MessageItem({ msg, isUser, isCurrentAssistant, assistantStreaming }: MessageItemProps) {
+  const text = useMemo(
+    () => msg.parts
+      ?.filter((p) => p.type === "text")
+      .map((p) => ("text" in p ? (p as unknown as { text: string }).text : ""))
+      .join("") ?? "",
+    [msg.parts],
+  );
+  const chartParts = useMemo(
+    () => msg.parts?.filter((p) => p.type === "data-chart") ?? [],
+    [msg.parts],
+  );
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"} animate-fade-in`}>
+      <div className="max-w-[75%]">
+        <div
+          className={`rounded-2xl px-4 py-2.5 ${
+            isUser
+              ? "bg-blue-600 text-white"
+              : "bg-white border border-gray-200 text-gray-900 shadow-sm"
+          }`}
+        >
+          {isUser ? (
+            <p className="whitespace-pre-wrap">{text}</p>
+          ) : (
+            <>
+              <Markdown content={text} />
+              {chartParts.map((part, i) => {
+                const dp = part as { type: string; data: any };
+                return <Chart key={i} data={dp.data} />;
+              })}
+            </>
+          )}
+          {isCurrentAssistant && assistantStreaming && <Cursor />}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CHAT_ID = getStoredThreadId() ?? crypto.randomUUID();
+if (!getStoredThreadId()) storeThreadId(CHAT_ID);
+
 export default function ChatPage() {
   const { user, signOut } = useAuth();
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [initialMsgs, setInitialMsgs] = useState<UIMessage[] | undefined>(undefined);
+  const [loading, setLoading] = useState(!!getStoredThreadId());
+
+  useEffect(() => {
+    if (getStoredThreadId()) {
+      loadMessages(CHAT_ID).then((msgs) => {
+        setInitialMsgs(msgs);
+        setLoading(false);
+      });
+    }
+  }, []);
 
   const { messages, status, error, sendMessage, stop } = useChat({
+    id: CHAT_ID,
+    messages: initialMsgs,
     transport: new DefaultChatTransport({
       api: `${env.apiBaseUrl}/api/chat/stream`,
       headers: async () => {
@@ -38,6 +129,14 @@ export default function ChatPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  if (loading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="text-gray-400 text-sm">Loading...</div>
+      </div>
+    );
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -55,9 +154,9 @@ export default function ChatPage() {
 
   const isStreaming = status === "streaming";
   const lastAssistant = messages.filter((m) => m.role === "assistant").at(-1);
-  const assistantStreaming = isStreaming && lastAssistant?.parts?.some(
+  const assistantStreaming = !!(isStreaming && lastAssistant?.parts?.some(
     (p) => p.type === "text" && "state" in p && p.state === "streaming"
-  );
+  ));
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -96,32 +195,15 @@ export default function ChatPage() {
 
           {messages.map((msg) => {
             const isUser = msg.role === "user";
-            const text = msg.parts
-              ?.filter((p) => p.type === "text")
-              .map((p) => ("text" in p ? (p as { text: string }).text : ""))
-              .join("") ?? "";
-
             const isCurrentAssistant = !isUser && msg.id === lastAssistant?.id;
-
             return (
-              <div key={msg.id} className={`flex ${isUser ? "justify-end" : "justify-start"} animate-fade-in`}>
-                <div className={`max-w-[75%] ${isUser ? "order-1" : "order-1"}`}>
-                  <div
-                    className={`rounded-2xl px-4 py-2.5 ${
-                      isUser
-                        ? "bg-blue-600 text-white"
-                        : "bg-white border border-gray-200 text-gray-900 shadow-sm"
-                    }`}
-                  >
-                    {isUser ? (
-                      <p className="whitespace-pre-wrap">{text}</p>
-                    ) : (
-                      <Markdown content={text} />
-                    )}
-                    {isCurrentAssistant && assistantStreaming && <Cursor />}
-                  </div>
-                </div>
-              </div>
+              <MessageItem
+                key={msg.id}
+                msg={msg as MessageItemProps["msg"]}
+                isUser={isUser}
+                isCurrentAssistant={isCurrentAssistant}
+                assistantStreaming={assistantStreaming}
+              />
             );
           })}
 

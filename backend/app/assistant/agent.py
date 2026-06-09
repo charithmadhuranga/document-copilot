@@ -188,11 +188,18 @@ def _resolve_model() -> Any:
             )
 
 
+def _make_system_prompt(ctx: RunContext[DocumentAgentDeps]) -> str:
+    prompt = _INSTRUCTIONS
+    if ctx.deps.message_history:
+        prompt += "\n\n## Conversation history\n\n" + ctx.deps.message_history
+    return prompt
+
+
 def build_agent() -> Agent[DocumentAgentDeps, GroundedAnswer]:
     agent = Agent[DocumentAgentDeps, GroundedAnswer](
         _resolve_model(),
         output_type=GroundedAnswer,
-        system_prompt=_INSTRUCTIONS,
+        system_prompt=_make_system_prompt,
         tool_timeout=120,
     )
     agent.tool(_search_filings)

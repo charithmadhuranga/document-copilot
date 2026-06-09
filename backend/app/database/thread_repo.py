@@ -35,12 +35,12 @@ def list_threads(owner_id: uuid.UUID) -> list[dict[str, Any]]:
     ]
 
 
-def create_thread(owner_id: uuid.UUID, title: str = "New Chat") -> dict[str, Any]:
+def create_thread(owner_id: uuid.UUID, title: str = "New Chat", id: uuid.UUID | None = None) -> dict[str, Any]:
     rows = fetch_rows(
         """INSERT INTO chat_threads (id, owner_id, title)
            VALUES (%(id)s, %(owner_id)s, %(title)s)
            RETURNING id, title, created_at, updated_at""",
-        {"id": uuid.uuid4(), "owner_id": owner_id, "title": title},
+        {"id": id or uuid.uuid4(), "owner_id": owner_id, "title": title},
     )
     r = rows[0]
     return {

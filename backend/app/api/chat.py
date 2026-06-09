@@ -62,7 +62,7 @@ async def chat_stream(
 
     if not thread:
         ensure_profile(user.id, user.email)
-        thread = create_thread(user.id, title="Chat")
+        thread = create_thread(user.id, title="Chat", id=thread_uuid)
         thread_uuid = uuid.UUID(thread["id"])
 
     return StreamingResponse(

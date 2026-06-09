@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import sys
+import uuid
 from typing import Any, AsyncGenerator
+
+logger = logging.getLogger(__name__)
 
 from app.assistant.agent import build_agent
 from app.assistant.deps import DocumentAgentDeps
 from app.assistant.outputs import GroundedAnswer
+from app.database.message_repo import create_message, save_citations
 from app.grounding.validator import GroundingError, GroundingValidator
 from app.retrieval.retriever import DocumentRetriever
 
@@ -28,12 +34,23 @@ def _extract_text(msg: dict[str, Any]) -> str:
     return ""
 
 
+def _format_history(messages: list[dict]) -> str:
+    lines: list[str] = []
+    for msg in messages[:-1]:
+        role = msg.get("role", "unknown")
+        text = _extract_text(msg)
+        if text.strip():
+            lines.append(f"[{role}]: {text.strip()}")
+    return "\n".join(lines)
+
+
 async def run_chat_turn(
     thread_id: str,
     messages: list[dict],
     user_id: str = "",
 ) -> AsyncGenerator[str, None]:
     last_message = _extract_text(messages[-1]) if messages else ""
+    message_history = _format_history(messages) if len(messages) > 1 else ""
     retriever = DocumentRetriever()
     validator = GroundingValidator()
 
@@ -41,7 +58,10 @@ async def run_chat_turn(
         user_id=user_id,
         thread_id=thread_id,
         retriever=retriever,
+        message_history=message_history,
     )
+
+    thread_uuid = uuid.UUID(thread_id)
 
     yield _sse({"type": "start", "messageId": thread_id})
     yield _sse({"type": "start-step"})
@@ -58,6 +78,7 @@ async def run_chat_turn(
             await asyncio.sleep(1)
             result = await agent.run(last_message, deps=deps)
         answer: GroundedAnswer = result.output
+        print(f"PERSIST: got answer len={len(answer.answer)} citations={len(answer.citations)}", file=sys.stderr, flush=True)
 
         cited_ids = {c.chunk_id for c in answer.citations}
         validator.validate(answer, retrieved_chunk_ids | cited_ids)
@@ -77,6 +98,50 @@ async def run_chat_turn(
                         "excerpt": c.excerpt,
                     },
                 })
+
+        if answer.chart:
+            yield _sse({
+                "type": "data-chart",
+                "data": {
+                    "chartType": answer.chart.chart_type,
+                    "title": answer.chart.title,
+                    "dataPoints": [
+                        {
+                            "label": dp.label,
+                            "value": dp.value,
+                            "category": dp.category,
+                        }
+                        for dp in answer.chart.data_points
+                    ],
+                    "xLabel": answer.chart.x_label,
+                    "yLabel": answer.chart.y_label,
+                },
+            })
+
+        citation_data = [
+            {
+                "index": c.citation_index,
+                "chunkId": str(c.chunk_id),
+                "excerpt": c.excerpt,
+            }
+            for c in (answer.citations or [])
+        ]
+
+        try:
+            print(f"PERSIST: creating user msg for thread {thread_uuid}", file=sys.stderr, flush=True)
+            create_message(thread_uuid, "user", last_message)
+            msg = create_message(
+                thread_uuid,
+                "assistant",
+                answer.answer,
+                metadata={"citations": citation_data} if citation_data else None,
+            )
+            print(f"PERSIST: msg saved id={msg['id']}", file=sys.stderr, flush=True)
+            if citation_data:
+                save_citations(uuid.UUID(msg["id"]), citation_data)
+                print(f"PERSIST: citations saved count={len(citation_data)}", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"PERSIST FAILED: {e}", file=sys.stderr, flush=True)
 
     except GroundingError as e:
         error_msg = f"I could not verify the answer against the source documents. {e}"

@@ -7,6 +7,23 @@ from typing import Any
 from app.database.connection import fetch_rows
 
 
+def save_citations(message_id: uuid.UUID, citations: list[dict[str, Any]]) -> None:
+    if not citations:
+        return
+    for c in citations:
+        fetch_rows(
+            """INSERT INTO message_citations (id, message_id, chunk_id, citation_index, excerpt)
+               VALUES (%(id)s, %(message_id)s, %(chunk_id)s, %(index)s, %(excerpt)s)""",
+            {
+                "id": uuid.uuid4(),
+                "message_id": message_id,
+                "chunk_id": c.get("chunkId"),
+                "index": c.get("index", 0),
+                "excerpt": c.get("excerpt", ""),
+            },
+        )
+
+
 def list_messages(thread_id: uuid.UUID, owner_id: uuid.UUID) -> list[dict[str, Any]]:
     rows = fetch_rows(
         """SELECT cm.id, cm.role, cm.content, cm.metadata, cm.created_at
