@@ -12,6 +12,7 @@ from app.database.message_repo import list_messages
 from app.database.thread_repo import (
     create_thread,
     delete_thread,
+    ensure_profile,
     get_thread,
     list_threads,
     update_thread_title,
@@ -21,8 +22,13 @@ router = APIRouter()
 
 
 class ChatStreamRequest(BaseModel):
-    threadId: str
+    threadId: str = ""
+    id: str = ""
     messages: list[dict]
+
+    @property
+    def resolved_thread_id(self) -> str:
+        return self.threadId or self.id
 
 
 class CreateThreadRequest(BaseModel):
@@ -38,18 +44,29 @@ async def chat_stream(
     body: ChatStreamRequest,
     user: AuthenticatedUser = Depends(get_current_user),
 ):
-    if not body.threadId or not body.threadId.strip():
+    thread_id = body.resolved_thread_id
+    if not thread_id:
         raise HTTPException(status_code=400, detail="threadId is required")
     if not body.messages:
         raise HTTPException(status_code=400, detail="At least one message is required")
 
-    thread_id = uuid.UUID(body.threadId)
-    thread = get_thread(thread_id, user.id)
+    try:
+        thread_uuid = uuid.UUID(thread_id)
+    except ValueError:
+        thread_uuid = None
+
+    if thread_uuid:
+        thread = get_thread(thread_uuid, user.id)
+    else:
+        thread = None
+
     if not thread:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        ensure_profile(user.id, user.email)
+        thread = create_thread(user.id, title="Chat")
+        thread_uuid = uuid.UUID(thread["id"])
 
     return StreamingResponse(
-        run_chat_turn(str(thread_id), body.messages, user_id=str(user.id)),
+        run_chat_turn(str(thread_uuid), body.messages, user_id=str(user.id)),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

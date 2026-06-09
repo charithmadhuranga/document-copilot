@@ -7,12 +7,12 @@ class SourcePassage(BaseModel):
     chunk_id: str
     content: str
     section: str | None = None
-    document_id: str
-    ticker: str
-    company_name: str
-    filing_type: str
-    filing_date: str
-    source_url: str
+    document_id: str = ""
+    ticker: str = ""
+    company_name: str = ""
+    filing_type: str = ""
+    filing_date: str = ""
+    source_url: str = ""
 
 
 class Citation(BaseModel):
@@ -24,4 +24,3 @@ class Citation(BaseModel):
 class GroundedAnswer(BaseModel):
     answer: str
     citations: list[Citation]
-    cited_passages: list[SourcePassage]

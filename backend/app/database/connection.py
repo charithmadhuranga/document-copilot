@@ -10,6 +10,8 @@ from psycopg2 import ProgrammingError
 
 from app.config import get_settings
 
+psycopg2.extras.register_uuid()
+
 
 @contextmanager
 def get_db():

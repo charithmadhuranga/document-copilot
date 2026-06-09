@@ -19,17 +19,31 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
+    develop:
+      watch:
+        - action: rebuild
+          path: ./backend
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       DATABASE_URL: postgresql://postgres:postgres@db:5432/document_copilot
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
       ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
-    volumes:
-      - ./backend:/app
+      LLM_PROVIDER: ollama
+      EMBEDDING_PROVIDER: ollama
+      OLLAMA_LLM_MODEL: gpt-oss:120b-cloud
+      OLLAMA_EMBEDDING_MODEL: nomic-embed-text:latest
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      OLLAMA_API_KEY: ollama
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -38,14 +52,18 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
+    develop:
+      watch:
+        - action: rebuild
+          path: ./frontend/src
+        - action: rebuild
+          path: ./frontend/package.json
     ports:
       - "5173:5173"
     environment:
       VITE_API_BASE_URL: http://localhost:8000
       VITE_SUPABASE_URL: ${SUPABASE_URL}
       VITE_SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
-    volumes:
-      - ./frontend/src:/app/src
     depends_on:
       - backend
 

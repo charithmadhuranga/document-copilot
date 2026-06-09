@@ -16,10 +16,10 @@ def _search_filings(ctx: RunContext[DocumentAgentDeps], query: str, top_k: int =
     passages = ctx.deps.retriever.retrieve(query, top_n=top_k)
     return [
         SourcePassage(
-            chunk_id=p.chunk_id,
+            chunk_id=str(p.chunk_id),
             content=p.content,
             section=p.section,
-            document_id=p.document_id,
+            document_id=str(p.document_id),
             ticker=p.ticker,
             company_name=p.company_name,
             filing_type=p.filing_type,
@@ -36,10 +36,10 @@ def _read_chunk(ctx: RunContext[DocumentAgentDeps], chunk_id: str) -> SourcePass
         return None
     p = passages[0]
     return SourcePassage(
-        chunk_id=p.chunk_id,
+        chunk_id=str(p.chunk_id),
         content=p.content,
         section=p.section,
-        document_id=p.document_id,
+        document_id=str(p.document_id),
         ticker=p.ticker,
         company_name=p.company_name,
         filing_type=p.filing_type,
@@ -193,6 +193,7 @@ def build_agent() -> Agent[DocumentAgentDeps, GroundedAnswer]:
         _resolve_model(),
         output_type=GroundedAnswer,
         system_prompt=_INSTRUCTIONS,
+        tool_timeout=120,
     )
     agent.tool(_search_filings)
     agent.tool(_read_chunk)

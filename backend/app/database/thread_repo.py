@@ -7,6 +7,15 @@ from typing import Any
 from app.database.connection import fetch_rows
 
 
+def ensure_profile(owner_id: uuid.UUID, email: str) -> None:
+    fetch_rows(
+        """INSERT INTO profiles (id, email)
+           VALUES (%(id)s, %(email)s)
+           ON CONFLICT (id) DO NOTHING""",
+        {"id": owner_id, "email": email},
+    )
+
+
 def list_threads(owner_id: uuid.UUID) -> list[dict[str, Any]]:
     rows = fetch_rows(
         """SELECT id, title, created_at, updated_at

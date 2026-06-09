@@ -1,11 +1,25 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+    # If CWD doesn't have .env, try the project root
+    def __init__(self, **kwargs):
+        if not Path(".env").exists():
+            root = Path(__file__).resolve().parent.parent.parent
+            dotenv = root / ".env"
+            if dotenv.exists():
+                kwargs.setdefault("_env_file", str(dotenv))
+        super().__init__(**kwargs)
     supabase_url: str = ""
     supabase_anon_key: str = ""
     supabase_service_role_key: str = ""
@@ -48,6 +62,7 @@ class Settings(BaseSettings):
 
     # -- Ollama (OpenAI-compatible) --
     ollama_llm_model: str = "llama3.2"
+    ollama_api_key: str = "ollama"
     ollama_base_url: str = "http://localhost:11434/v1"
 
     # -- LM Studio (OpenAI-compatible) --

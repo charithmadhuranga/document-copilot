@@ -5,8 +5,8 @@ help: ## Show this help
 
 # ─── Dev ─────────────────────────────────────────────────────────────────────
 
-dev: ## Start all services in dev mode (hot-reload)
-	docker compose up --watch
+dev: ## Start all services in dev mode (build + hot-reload via --watch rebuild)
+	docker compose up --build --watch
 
 dev-build: ## Build and start all services in dev mode
 	docker compose up --build

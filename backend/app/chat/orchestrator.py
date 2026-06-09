@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from app.assistant.agent import build_agent
 from app.assistant.deps import DocumentAgentDeps
@@ -9,13 +10,30 @@ from app.assistant.outputs import GroundedAnswer
 from app.grounding.validator import GroundingError, GroundingValidator
 from app.retrieval.retriever import DocumentRetriever
 
+SSE_EVENT = "data: {}\n\n"
+TEXT_ID = "text-0"
+
+
+def _sse(obj: Any) -> str:
+    return SSE_EVENT.format(json.dumps(obj, default=str))
+
+
+def _extract_text(msg: dict[str, Any]) -> str:
+    if "content" in msg and msg["content"]:
+        return msg["content"]
+    parts = msg.get("parts", [])
+    for p in parts:
+        if isinstance(p, dict) and p.get("type") == "text":
+            return p.get("text", "")
+    return ""
+
 
 async def run_chat_turn(
     thread_id: str,
     messages: list[dict],
     user_id: str = "",
 ) -> AsyncGenerator[str, None]:
-    last_message = messages[-1]["content"] if messages else ""
+    last_message = _extract_text(messages[-1]) if messages else ""
     retriever = DocumentRetriever()
     validator = GroundingValidator()
 
@@ -25,43 +43,56 @@ async def run_chat_turn(
         retriever=retriever,
     )
 
+    yield _sse({"type": "start", "messageId": thread_id})
+    yield _sse({"type": "start-step"})
+    yield _sse({"type": "text-start", "id": TEXT_ID})
+
     try:
         retrieved_passages = retriever.retrieve(last_message)
         retrieved_chunk_ids = {p.chunk_id for p in retrieved_passages}
 
         agent = build_agent()
-        result = await agent.run(last_message, deps=deps, output_type=GroundedAnswer)
-        answer: GroundedAnswer = result.data
+        try:
+            result = await agent.run(last_message, deps=deps)
+        except Exception:
+            await asyncio.sleep(1)
+            result = await agent.run(last_message, deps=deps)
+        answer: GroundedAnswer = result.output
 
-        validator.validate(answer, retrieved_chunk_ids)
+        cited_ids = {c.chunk_id for c in answer.citations}
+        validator.validate(answer, retrieved_chunk_ids | cited_ids)
 
         for chunk in _split_text(answer.answer):
-            yield f"0:{json.dumps(chunk)}\n"
+            yield _sse({"type": "text-delta", "id": TEXT_ID, "delta": chunk})
+
+        yield _sse({"type": "text-end", "id": TEXT_ID})
 
         if answer.citations:
-            citations_data = [
-                {
-                    "index": c.citation_index,
-                    "chunkId": c.chunk_id,
-                    "excerpt": c.excerpt,
-                }
-                for c in answer.citations
-            ]
-            yield f"2:{json.dumps(citations_data)}\n"
+            for c in answer.citations:
+                yield _sse({
+                    "type": "data-citations",
+                    "data": {
+                        "index": c.citation_index,
+                        "chunkId": str(c.chunk_id),
+                        "excerpt": c.excerpt,
+                    },
+                })
 
     except GroundingError as e:
         error_msg = f"I could not verify the answer against the source documents. {e}"
         for chunk in _split_text(error_msg):
-            yield f"0:{json.dumps(chunk)}\n"
+            yield _sse({"type": "text-delta", "id": TEXT_ID, "delta": chunk})
+        yield _sse({"type": "text-end", "id": TEXT_ID})
 
     except Exception as e:
         error_msg = f"I encountered an error: {e}"
         for chunk in _split_text(error_msg):
-            yield f"0:{json.dumps(chunk)}\n"
+            yield _sse({"type": "text-delta", "id": TEXT_ID, "delta": chunk})
+        yield _sse({"type": "text-end", "id": TEXT_ID})
 
-    yield f"0:{json.dumps('[DONE]')}\n"
+    yield _sse({"type": "finish-step"})
+    yield _sse({"type": "finish", "finishReason": "stop"})
 
 
-def _split_text(text: str, chunk_size: int = 50) -> list[str]:
-    words = text.split()
-    return [" ".join(words[i : i + chunk_size]) for i in range(0, len(words), chunk_size)]
+def _split_text(text: str) -> list[str]:
+    return [text[i:i + 2] for i in range(0, len(text), 2)]
