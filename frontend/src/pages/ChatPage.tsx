@@ -3,9 +3,10 @@ import { useChat } from "@ai-sdk/react";
 import { useAuth } from "@/hooks/useAuth";
 import { env } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
-import { FormEvent, memo, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "@/components/Markdown";
 import Chart from "@/components/Chart";
+import ThreadSidebar from "@/components/ThreadSidebar";
 
 const THREAD_KEY = "doc-copilot-thread";
 
@@ -95,27 +96,27 @@ const MessageItem = memo(function MessageItem({ msg, isUser, isCurrentAssistant,
   );
 });
 
-const CHAT_ID = getStoredThreadId() ?? crypto.randomUUID();
-if (!getStoredThreadId()) storeThreadId(CHAT_ID);
-
-export default function ChatPage() {
-  const { user, signOut } = useAuth();
+function ChatView({ threadId }: { threadId: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [initialMsgs, setInitialMsgs] = useState<UIMessage[] | undefined>(undefined);
-  const [loading, setLoading] = useState(!!getStoredThreadId());
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (getStoredThreadId()) {
-      loadMessages(CHAT_ID).then((msgs) => {
+    const stored = getStoredThreadId();
+    if (stored && stored === threadId) {
+      loadMessages(threadId).then((msgs) => {
         setInitialMsgs(msgs);
         setLoading(false);
       });
+    } else {
+      setInitialMsgs([]);
+      setLoading(false);
     }
-  }, []);
+  }, [threadId]);
 
   const { messages, status, error, sendMessage, stop } = useChat({
-    id: CHAT_ID,
+    id: threadId,
     messages: initialMsgs,
     transport: new DefaultChatTransport({
       api: `${env.apiBaseUrl}/api/chat/stream`,
@@ -132,7 +133,7 @@ export default function ChatPage() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex flex-1 items-center justify-center bg-gray-50">
         <div className="text-gray-400 text-sm">Loading...</div>
       </div>
     );
@@ -159,19 +160,13 @@ export default function ChatPage() {
   ));
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col flex-1 bg-gray-50">
       <header className="flex items-center justify-between px-5 py-3 bg-white border-b border-gray-200 shrink-0">
         <h1 className="text-lg font-semibold text-gray-900">
           <span className="text-blue-600">Document</span> Copilot
         </h1>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500">{user?.email}</span>
-          <button
-            onClick={signOut}
-            className="text-sm text-gray-500 hover:text-red-600 transition-colors"
-          >
-            Sign out
-          </button>
+          <span className="text-sm text-gray-500">{/* email could go here */}</span>
         </div>
       </header>
 
@@ -262,6 +257,39 @@ export default function ChatPage() {
           )}
         </form>
       </footer>
+    </div>
+  );
+}
+
+export default function ChatPage() {
+  const { signOut } = useAuth();
+
+  const getInitialThread = useCallback(() => {
+    const stored = getStoredThreadId();
+    if (stored) return stored;
+    const id = crypto.randomUUID();
+    storeThreadId(id);
+    return id;
+  }, []);
+
+  const [threadId, setThreadId] = useState(getInitialThread);
+
+  function handleSwitchThread(newId: string) {
+    storeThreadId(newId);
+    setThreadId(newId);
+  }
+
+  return (
+    <div className="flex h-screen">
+      <ThreadSidebar currentThreadId={threadId} onSwitchThread={handleSwitchThread} />
+      <ChatView key={threadId} threadId={threadId} />
+      {/* Floating sign out */}
+      <button
+        onClick={signOut}
+        className="fixed bottom-4 right-4 z-50 text-xs text-gray-400 hover:text-red-500 transition-colors bg-white/80 backdrop-blur rounded-lg px-2.5 py-1.5 border border-gray-200 shadow-sm"
+      >
+        Sign out
+      </button>
     </div>
   );
 }

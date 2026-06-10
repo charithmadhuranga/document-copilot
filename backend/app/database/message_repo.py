@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime
 from typing import Any
@@ -60,7 +61,7 @@ def create_message(
             "thread_id": thread_id,
             "role": role,
             "content": content,
-            "metadata": metadata,
+            "metadata": json.dumps(metadata) if metadata else None,
         },
     )
     r = rows[0]

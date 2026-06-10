@@ -6,15 +6,15 @@ const BASE = env.apiBaseUrl;
 export interface ChatThread {
   id: string;
   title: string;
-  created_at: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface ChatMessage {
   id: string;
-  thread_id: string;
   role: "user" | "assistant";
   content: string;
-  created_at: string;
+  createdAt?: string;
 }
 
 export const api = {
@@ -22,7 +22,7 @@ export const api = {
     return apiFetch<ChatThread[]>(`${BASE}/api/threads`);
   },
 
-  async createThread(title?: string): Promise<ChatThread> {
+  async createThread(title = "New Chat"): Promise<ChatThread> {
     return apiFetch<ChatThread>(`${BASE}/api/threads`, {
       method: "POST",
       body: JSON.stringify({ title }),

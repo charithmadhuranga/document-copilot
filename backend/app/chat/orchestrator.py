@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sys
 import uuid
 from typing import Any, AsyncGenerator
 
@@ -78,7 +77,6 @@ async def run_chat_turn(
             await asyncio.sleep(1)
             result = await agent.run(last_message, deps=deps)
         answer: GroundedAnswer = result.output
-        print(f"PERSIST: got answer len={len(answer.answer)} citations={len(answer.citations)}", file=sys.stderr, flush=True)
 
         cited_ids = {c.chunk_id for c in answer.citations}
         validator.validate(answer, retrieved_chunk_ids | cited_ids)
@@ -128,7 +126,6 @@ async def run_chat_turn(
         ]
 
         try:
-            print(f"PERSIST: creating user msg for thread {thread_uuid}", file=sys.stderr, flush=True)
             create_message(thread_uuid, "user", last_message)
             msg = create_message(
                 thread_uuid,
@@ -136,12 +133,10 @@ async def run_chat_turn(
                 answer.answer,
                 metadata={"citations": citation_data} if citation_data else None,
             )
-            print(f"PERSIST: msg saved id={msg['id']}", file=sys.stderr, flush=True)
             if citation_data:
                 save_citations(uuid.UUID(msg["id"]), citation_data)
-                print(f"PERSIST: citations saved count={len(citation_data)}", file=sys.stderr, flush=True)
         except Exception as e:
-            print(f"PERSIST FAILED: {e}", file=sys.stderr, flush=True)
+            logger.warning("Failed to persist messages: %s", e)
 
     except GroundingError as e:
         error_msg = f"I could not verify the answer against the source documents. {e}"

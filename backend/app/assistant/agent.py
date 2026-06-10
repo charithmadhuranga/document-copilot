@@ -199,9 +199,9 @@ def build_agent() -> Agent[DocumentAgentDeps, GroundedAnswer]:
     agent = Agent[DocumentAgentDeps, GroundedAnswer](
         _resolve_model(),
         output_type=GroundedAnswer,
-        system_prompt=_make_system_prompt,
         tool_timeout=120,
     )
     agent.tool(_search_filings)
     agent.tool(_read_chunk)
+    agent.system_prompt(_make_system_prompt)
     return agent
